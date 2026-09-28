@@ -7,6 +7,9 @@ from nomad_measurements_sweepme.schema_packages.schema_package import (
     m_package,
 )
 
+SYNTHETIC_SATURATION = 1.125
+SYNTHETIC_POWER_AT_MPP = 6.75
+
 
 def test_schema_package_loads():
     assert schema_package_entry_point.load() is m_package
@@ -31,8 +34,8 @@ def test_sweepme_source_metadata_serializes_without_scientific_mapping():
         source_comment='Synthetic schema test comment',
         temperature_source='42',
         light_level='987',
-        saturation=1.125,
-        power_at_mpp=6.75,
+        saturation=SYNTHETIC_SATURATION,
+        power_at_mpp=SYNTHETIC_POWER_AT_MPP,
     )
 
     serialized = measurement.m_to_dict()
@@ -43,5 +46,5 @@ def test_sweepme_source_metadata_serializes_without_scientific_mapping():
     assert serialized['source_comment'] == 'Synthetic schema test comment'
     assert serialized['temperature_source'] == '42'
     assert serialized['light_level'] == '987'
-    assert serialized['saturation'] == 1.125
-    assert serialized['power_at_mpp'] == 6.75
+    assert serialized['saturation'] == SYNTHETIC_SATURATION
+    assert serialized['power_at_mpp'] == SYNTHETIC_POWER_AT_MPP
