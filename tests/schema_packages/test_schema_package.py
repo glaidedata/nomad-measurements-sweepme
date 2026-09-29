@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from baseclasses.solar_energy.jvmeasurement import JVMeasurement
+from baseclasses.solar_energy.jvmeasurement import JVMeasurement, SolarCellJV
 from nomad.datamodel import EntryArchive, EntryMetadata
 from nomad.datamodel.context import Context
 from nomad.datamodel.data import EntryData
@@ -40,6 +40,7 @@ UPDATED_ISC = -1.5
 UPDATED_FILL_FACTOR_PERCENT = 66.0
 UPDATED_V_MPP = 0.52
 UPDATED_I_MPP = -1.1
+EXPECTED_FALLBACK_EFFICIENCY = 0.5625
 
 
 class RawFileContext(Context):
@@ -131,6 +132,10 @@ def magnitudes(quantity) -> list[float]:
     return quantity.magnitude.tolist()
 
 
+def magnitude_in(quantity, unit: str) -> float:
+    return quantity.to(unit).magnitude
+
+
 def test_schema_package_loads():
     assert schema_package_entry_point.load() is m_package
 
@@ -213,6 +218,46 @@ def test_normalize_populates_hzb_jv_model_from_sweepme_source(tmp_path):
     assert (
         illuminated_curve.current_density_at_maximun_power_point.magnitude
         == pytest.approx(abs(INITIAL_I_MPP) / INITIAL_ACTIVE_AREA)
+    )
+
+
+def test_normalization_publishes_hzb_solar_cell_results_and_inherited_plot(tmp_path):
+    measurement, archive = normalize_from_source(tmp_path, sweepme_source())
+    dark_curve, illuminated_curve = measurement.jv_curve
+    solar_cell = archive.results.properties.optoelectronic.solar_cell
+    with pytest.warns(Warning):
+        _, _, _, fallback_efficiency = illuminated_curve.cell_params()
+
+    assert archive.results is not None
+    assert solar_cell is not None
+    assert magnitude_in(solar_cell.open_circuit_voltage, 'V') == INITIAL_VOC
+    assert magnitude_in(
+        solar_cell.short_circuit_current_density, 'mA / cm^2'
+    ) == pytest.approx(abs(INITIAL_ISC) / INITIAL_ACTIVE_AREA)
+    assert solar_cell.fill_factor == INITIAL_FILL_FACTOR_PERCENT / 100
+    assert solar_cell.efficiency == INITIAL_PCE
+    assert magnitude_in(solar_cell.illumination_intensity, 'mW / cm^2') == (
+        INITIAL_INTENSITY
+    )
+    assert fallback_efficiency == pytest.approx(EXPECTED_FALLBACK_EFFICIENCY)
+    assert fallback_efficiency != illuminated_curve.efficiency
+    assert dark_curve.efficiency is None
+    assert solar_cell.efficiency == illuminated_curve.efficiency
+
+    for curve in (dark_curve, illuminated_curve):
+        assert SolarCellJV.m_def in curve.m_def.all_base_sections
+    assert SolarCellJV.m_def.a_plotly_graph_object == [
+        {'data': {'x': '#voltage', 'y': '#current_density'}},
+        {'data': {'x': '#voltage', 'y': '#current_density'}},
+    ]
+
+    measurement.normalize(archive, CapturingLogger())
+
+    assert len(measurement.jv_curve) == EXPECTED_CURVE_COUNT
+    assert archive.results.properties.optoelectronic.solar_cell is solar_cell
+    assert solar_cell.efficiency == INITIAL_PCE
+    assert magnitude_in(solar_cell.illumination_intensity, 'mW / cm^2') == (
+        INITIAL_INTENSITY
     )
 
 
@@ -304,6 +349,16 @@ def test_normalize_replaces_science_and_preserves_user_fields(tmp_path):
         == pytest.approx(abs(UPDATED_I_MPP) / UPDATED_ACTIVE_AREA)
     )
     assert illuminated_curve.light_intensity.magnitude == UPDATED_INTENSITY
+    solar_cell = archive.results.properties.optoelectronic.solar_cell
+    assert magnitude_in(solar_cell.open_circuit_voltage, 'V') == UPDATED_VOC
+    assert magnitude_in(
+        solar_cell.short_circuit_current_density, 'mA / cm^2'
+    ) == pytest.approx(abs(UPDATED_ISC) / UPDATED_ACTIVE_AREA)
+    assert solar_cell.fill_factor == UPDATED_FILL_FACTOR_PERCENT / 100
+    assert solar_cell.efficiency == UPDATED_PCE
+    assert magnitude_in(solar_cell.illumination_intensity, 'mW / cm^2') == (
+        UPDATED_INTENSITY
+    )
     assert measurement.name == 'User-provided title'
     assert measurement.description == 'User-provided description'
     assert measurement.samples is initial_samples
