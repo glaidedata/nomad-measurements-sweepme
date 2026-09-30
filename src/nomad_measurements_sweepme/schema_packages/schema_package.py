@@ -153,17 +153,6 @@ class SweepMeJVMeasurement(JVMeasurement, PlotSection, EntryData):
         return voltage, current_density
 
     @staticmethod
-    def _combined_trace_label(
-        curve_name: str, sample_id: str | None, measurement_id: str | None
-    ) -> str:
-        parts = [curve_name]
-        if sample_id:
-            parts.append(f'Sample {sample_id}')
-        if measurement_id:
-            parts.append(f'ID {measurement_id}')
-        return ' — '.join(parts)
-
-    @staticmethod
     def _jv_figure(
         label: str,
         traces: list[tuple[str, list[float], list[float]]],
@@ -302,20 +291,12 @@ class SweepMeJVMeasurement(JVMeasurement, PlotSection, EntryData):
                     'SweepMe JV',
                     [
                         (
-                            cls._combined_trace_label(
-                                'Dark',
-                                conditions['Sample ID'],
-                                conditions['Measurement ID'],
-                            ),
+                            dark_curve.cell_name or 'Dark',
                             dark_voltage,
                             dark_current_density,
                         ),
                         (
-                            cls._combined_trace_label(
-                                'Illuminated',
-                                conditions['Sample ID'],
-                                conditions['Measurement ID'],
-                            ),
+                            illuminated_curve.cell_name or 'Illuminated',
                             illuminated_voltage,
                             illuminated_current_density,
                         ),

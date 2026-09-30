@@ -167,16 +167,9 @@ def assert_jv_figures(measurement, dark_traces, illuminated_traces) -> None:
         measurement.figures[0],
         'SweepMe JV',
         [
+            (dark_curve.cell_name or 'Dark', *dark_traces[0][1:]),
             (
-                SweepMeJVMeasurement._combined_trace_label(
-                    'Dark', measurement.sample_id, measurement.measurement_id
-                ),
-                *dark_traces[0][1:],
-            ),
-            (
-                SweepMeJVMeasurement._combined_trace_label(
-                    'Illuminated', measurement.sample_id, measurement.measurement_id
-                ),
+                illuminated_curve.cell_name or 'Illuminated',
                 *illuminated_traces[0][1:],
             ),
         ],
@@ -311,17 +304,13 @@ def test_normalization_materializes_hzb_style_and_sweepme_jv_figures(tmp_path):
         [('Dark', [-0.2, 0.1], [-1.5, 0.5])],
         [('Illuminated', [0.0, 0.45, 0.8], [-3.0, -1.25, 0.25])],
     )
-    assert [trace['name'] for trace in measurement.figures[0].figure['data']] == [
-        'Dark — Sample 0008-SYN — ID measurement_beta',
-        'Illuminated — Sample 0008-SYN — ID measurement_beta',
-    ]
-
-
-def test_combined_trace_labels_fall_back_without_source_identifiers():
-    assert SweepMeJVMeasurement._combined_trace_label('Dark', None, None) == 'Dark'
     assert (
-        SweepMeJVMeasurement._combined_trace_label('Illuminated', '', '')
-        == 'Illuminated'
+        [trace['name'] for trace in measurement.figures[0].figure['data']]
+        == [
+            dark_curve.cell_name,
+            illuminated_curve.cell_name,
+        ]
+        == ['Dark', 'Illuminated']
     )
 
 
@@ -418,10 +407,14 @@ def test_normalize_replaces_science_and_preserves_user_fields(tmp_path):
         [('Dark', [-0.1], [-1.0])],
         [('Illuminated', [0.2, 0.7], [-2.0, 0.4])],
     )
-    assert [trace['name'] for trace in measurement.figures[0].figure['data']] == [
-        'Dark — Sample 0012-UPDATED — ID measurement_gamma',
-        'Illuminated — Sample 0012-UPDATED — ID measurement_gamma',
-    ]
+    assert (
+        [trace['name'] for trace in measurement.figures[0].figure['data']]
+        == [
+            dark_curve.cell_name,
+            illuminated_curve.cell_name,
+        ]
+        == ['Dark', 'Illuminated']
+    )
     solar_cell = archive.results.properties.optoelectronic.solar_cell
     assert magnitude_in(solar_cell.open_circuit_voltage, 'V') == UPDATED_VOC
     assert magnitude_in(
