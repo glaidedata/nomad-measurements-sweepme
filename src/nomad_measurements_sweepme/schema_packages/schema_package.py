@@ -153,10 +153,30 @@ class SweepMeJVMeasurement(JVMeasurement, PlotSection, EntryData):
         return voltage, current_density
 
     @staticmethod
+    def _combined_trace_label(
+        curve_name: str, sample_id: str | None, measurement_id: str | None
+    ) -> str:
+        parts = [curve_name]
+        if sample_id:
+            parts.append(f'Sample {sample_id}')
+        if measurement_id:
+            parts.append(f'ID {measurement_id}')
+        return ' — '.join(parts)
+
+    @staticmethod
     def _jv_figure(
-        label: str, traces: list[tuple[str, list[float], list[float]]]
+        label: str,
+        traces: list[tuple[str, list[float], list[float]]],
+        show_legend: bool = False,
     ) -> PlotlyFigure:
         """Create a source-owned Plotly figure from mapped JV curve data."""
+        layout = {
+            'xaxis': {'title': {'text': 'Voltage (V)'}},
+            'yaxis': {'title': {'text': 'Current density (mA/cm²)'}},
+        }
+        if show_legend:
+            layout['showlegend'] = True
+
         return PlotlyFigure(
             label=label,
             figure={
@@ -170,10 +190,7 @@ class SweepMeJVMeasurement(JVMeasurement, PlotSection, EntryData):
                     }
                     for name, voltage, current_density in traces
                 ],
-                'layout': {
-                    'xaxis': {'title': {'text': 'Voltage (V)'}},
-                    'yaxis': {'title': {'text': 'Current density (mA/cm²)'}},
-                },
+                'layout': layout,
             },
         )
 
@@ -284,13 +301,26 @@ class SweepMeJVMeasurement(JVMeasurement, PlotSection, EntryData):
                 cls._jv_figure(
                     'SweepMe JV',
                     [
-                        ('Dark', dark_voltage, dark_current_density),
                         (
-                            'Illuminated',
+                            cls._combined_trace_label(
+                                'Dark',
+                                conditions['Sample ID'],
+                                conditions['Measurement ID'],
+                            ),
+                            dark_voltage,
+                            dark_current_density,
+                        ),
+                        (
+                            cls._combined_trace_label(
+                                'Illuminated',
+                                conditions['Sample ID'],
+                                conditions['Measurement ID'],
+                            ),
                             illuminated_voltage,
                             illuminated_current_density,
                         ),
                     ],
+                    show_legend=True,
                 )
             ],
         }

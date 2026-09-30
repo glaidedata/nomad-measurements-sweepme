@@ -136,12 +136,15 @@ def magnitude_in(quantity, unit: str) -> float:
     return quantity.to(unit).magnitude
 
 
-def assert_jv_figure(figure, label: str, traces) -> None:
+def assert_jv_figure(figure, label: str, traces, show_legend: bool = False) -> None:
     assert figure.label == label
-    assert figure.figure['layout'] == {
+    expected_layout = {
         'xaxis': {'title': {'text': 'Voltage (V)'}},
         'yaxis': {'title': {'text': 'Current density (mA/cm²)'}},
     }
+    if show_legend:
+        expected_layout['showlegend'] = True
+    assert figure.figure['layout'] == expected_layout
     assert len(figure.figure['data']) == len(traces)
     for trace, (name, voltage, current_density) in zip(
         figure.figure['data'], traces, strict=True
@@ -163,7 +166,21 @@ def assert_jv_figures(measurement, dark_traces, illuminated_traces) -> None:
     assert_jv_figure(
         measurement.figures[0],
         'SweepMe JV',
-        [*dark_traces, *illuminated_traces],
+        [
+            (
+                SweepMeJVMeasurement._combined_trace_label(
+                    'Dark', measurement.sample_id, measurement.measurement_id
+                ),
+                *dark_traces[0][1:],
+            ),
+            (
+                SweepMeJVMeasurement._combined_trace_label(
+                    'Illuminated', measurement.sample_id, measurement.measurement_id
+                ),
+                *illuminated_traces[0][1:],
+            ),
+        ],
+        show_legend=True,
     )
 
 
@@ -294,6 +311,18 @@ def test_normalization_materializes_hzb_style_and_sweepme_jv_figures(tmp_path):
         [('Dark', [-0.2, 0.1], [-1.5, 0.5])],
         [('Illuminated', [0.0, 0.45, 0.8], [-3.0, -1.25, 0.25])],
     )
+    assert [trace['name'] for trace in measurement.figures[0].figure['data']] == [
+        'Dark — Sample 0008-SYN — ID measurement_beta',
+        'Illuminated — Sample 0008-SYN — ID measurement_beta',
+    ]
+
+
+def test_combined_trace_labels_fall_back_without_source_identifiers():
+    assert SweepMeJVMeasurement._combined_trace_label('Dark', None, None) == 'Dark'
+    assert (
+        SweepMeJVMeasurement._combined_trace_label('Illuminated', '', '')
+        == 'Illuminated'
+    )
 
 
 def test_normalize_preserves_numeric_string_temperature_and_light_level(tmp_path):
@@ -389,6 +418,10 @@ def test_normalize_replaces_science_and_preserves_user_fields(tmp_path):
         [('Dark', [-0.1], [-1.0])],
         [('Illuminated', [0.2, 0.7], [-2.0, 0.4])],
     )
+    assert [trace['name'] for trace in measurement.figures[0].figure['data']] == [
+        'Dark — Sample 0012-UPDATED — ID measurement_gamma',
+        'Illuminated — Sample 0012-UPDATED — ID measurement_gamma',
+    ]
     solar_cell = archive.results.properties.optoelectronic.solar_cell
     assert magnitude_in(solar_cell.open_circuit_voltage, 'V') == UPDATED_VOC
     assert magnitude_in(
