@@ -9,6 +9,7 @@ from baseclasses.solar_energy.jvmeasurement import (
 )
 from nomad.datamodel.data import EntryData
 from nomad.datamodel.metainfo.annotations import ELNAnnotation, ELNComponentEnum
+from nomad.datamodel.metainfo.plot import PlotlyFigure, PlotSection
 from nomad.metainfo import Quantity, SchemaPackage
 
 if TYPE_CHECKING:
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
 m_package = SchemaPackage()
 
 
-class SweepMeJVMeasurement(JVMeasurement, EntryData):
+class SweepMeJVMeasurement(JVMeasurement, PlotSection, EntryData):
     """Editable SweepMe entry using the HZB JV scientific model."""
 
     sample_id = Quantity(
@@ -151,6 +152,31 @@ class SweepMeJVMeasurement(JVMeasurement, EntryData):
 
         return voltage, current_density
 
+    @staticmethod
+    def _jv_figure(
+        label: str, traces: list[tuple[str, list[float], list[float]]]
+    ) -> PlotlyFigure:
+        """Create a source-owned Plotly figure from mapped JV curve data."""
+        return PlotlyFigure(
+            label=label,
+            figure={
+                'data': [
+                    {
+                        'type': 'scatter',
+                        'mode': 'lines',
+                        'name': name,
+                        'x': voltage,
+                        'y': current_density,
+                    }
+                    for name, voltage, current_density in traces
+                ],
+                'layout': {
+                    'xaxis': {'title': {'text': 'Voltage (V)'}},
+                    'yaxis': {'title': {'text': 'Current density (mA/cm²)'}},
+                },
+            },
+        )
+
     @classmethod
     def _source_snapshot(cls, source: Any) -> dict[str, Any]:
         if not isinstance(source, dict):
@@ -205,12 +231,22 @@ class SweepMeJVMeasurement(JVMeasurement, EntryData):
         illuminated_voltage, illuminated_current_density = cls._curve_from_source(
             source.get('Illuminated Curve'), 'Illuminated Curve', active_area
         )
+        # NOMAD 1.4.3 does not materialize SolarCellJV's plot annotation on
+        # these concrete curve sections, so preserve its one-curve JV intent here.
+        dark_figure = cls._jv_figure(
+            'Dark JV', [('Dark', dark_voltage, dark_current_density)]
+        )
+        illuminated_figure = cls._jv_figure(
+            'Illuminated JV',
+            [('Illuminated', illuminated_voltage, illuminated_current_density)],
+        )
 
         dark_curve = SolarCellJVCurveDarkCustom(
             cell_name='Dark',
             dark=True,
             voltage=dark_voltage,
             current_density=dark_current_density,
+            figures=[dark_figure],
         )
         illuminated_curve = SolarCellJVCurveCustom(
             cell_name='Illuminated',
@@ -226,6 +262,7 @@ class SweepMeJVMeasurement(JVMeasurement, EntryData):
             current_density_at_maximun_power_point=(
                 abs(calculated_numbers['I_MPP']) / active_area
             ),
+            figures=[illuminated_figure],
         )
 
         return {
@@ -243,6 +280,19 @@ class SweepMeJVMeasurement(JVMeasurement, EntryData):
             'active_area': active_area,
             'intensity': intensity,
             'jv_curve': [dark_curve, illuminated_curve],
+            'figures': [
+                cls._jv_figure(
+                    'SweepMe JV',
+                    [
+                        ('Dark', dark_voltage, dark_current_density),
+                        (
+                            'Illuminated',
+                            illuminated_voltage,
+                            illuminated_current_density,
+                        ),
+                    ],
+                )
+            ],
         }
 
     def _refresh_source(self, archive: 'EntryArchive') -> None:

@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from baseclasses.solar_energy.jvmeasurement import JVMeasurement, SolarCellJV
+from baseclasses.solar_energy.jvmeasurement import JVMeasurement
 from nomad.datamodel import EntryArchive, EntryMetadata
 from nomad.datamodel.context import Context
 from nomad.datamodel.data import EntryData
@@ -136,6 +136,37 @@ def magnitude_in(quantity, unit: str) -> float:
     return quantity.to(unit).magnitude
 
 
+def assert_jv_figure(figure, label: str, traces) -> None:
+    assert figure.label == label
+    assert figure.figure['layout'] == {
+        'xaxis': {'title': {'text': 'Voltage (V)'}},
+        'yaxis': {'title': {'text': 'Current density (mA/cm²)'}},
+    }
+    assert len(figure.figure['data']) == len(traces)
+    for trace, (name, voltage, current_density) in zip(
+        figure.figure['data'], traces, strict=True
+    ):
+        assert trace['type'] == 'scatter'
+        assert trace['mode'] == 'lines'
+        assert trace['name'] == name
+        assert trace['x'] == voltage
+        assert trace['y'] == pytest.approx(current_density)
+
+
+def assert_jv_figures(measurement, dark_traces, illuminated_traces) -> None:
+    dark_curve, illuminated_curve = measurement.jv_curve
+    assert len(dark_curve.figures) == 1
+    assert len(illuminated_curve.figures) == 1
+    assert len(measurement.figures) == 1
+    assert_jv_figure(dark_curve.figures[0], 'Dark JV', dark_traces)
+    assert_jv_figure(illuminated_curve.figures[0], 'Illuminated JV', illuminated_traces)
+    assert_jv_figure(
+        measurement.figures[0],
+        'SweepMe JV',
+        [*dark_traces, *illuminated_traces],
+    )
+
+
 def test_schema_package_loads():
     assert schema_package_entry_point.load() is m_package
 
@@ -221,7 +252,7 @@ def test_normalize_populates_hzb_jv_model_from_sweepme_source(tmp_path):
     )
 
 
-def test_normalization_publishes_hzb_solar_cell_results_and_inherited_plot(tmp_path):
+def test_normalization_publishes_hzb_solar_cell_results(tmp_path):
     measurement, archive = normalize_from_source(tmp_path, sweepme_source())
     dark_curve, illuminated_curve = measurement.jv_curve
     solar_cell = archive.results.properties.optoelectronic.solar_cell
@@ -244,13 +275,6 @@ def test_normalization_publishes_hzb_solar_cell_results_and_inherited_plot(tmp_p
     assert dark_curve.efficiency is None
     assert solar_cell.efficiency == illuminated_curve.efficiency
 
-    for curve in (dark_curve, illuminated_curve):
-        assert SolarCellJV.m_def in curve.m_def.all_base_sections
-    assert SolarCellJV.m_def.a_plotly_graph_object == [
-        {'data': {'x': '#voltage', 'y': '#current_density'}},
-        {'data': {'x': '#voltage', 'y': '#current_density'}},
-    ]
-
     measurement.normalize(archive, CapturingLogger())
 
     assert len(measurement.jv_curve) == EXPECTED_CURVE_COUNT
@@ -258,6 +282,17 @@ def test_normalization_publishes_hzb_solar_cell_results_and_inherited_plot(tmp_p
     assert solar_cell.efficiency == INITIAL_PCE
     assert magnitude_in(solar_cell.illumination_intensity, 'mW / cm^2') == (
         INITIAL_INTENSITY
+    )
+
+
+def test_normalization_materializes_hzb_style_and_sweepme_jv_figures(tmp_path):
+    measurement, _ = normalize_from_source(tmp_path, sweepme_source())
+    dark_curve, illuminated_curve = measurement.jv_curve
+
+    assert_jv_figures(
+        measurement,
+        [('Dark', [-0.2, 0.1], [-1.5, 0.5])],
+        [('Illuminated', [0.0, 0.45, 0.8], [-3.0, -1.25, 0.25])],
     )
 
 
@@ -349,6 +384,11 @@ def test_normalize_replaces_science_and_preserves_user_fields(tmp_path):
         == pytest.approx(abs(UPDATED_I_MPP) / UPDATED_ACTIVE_AREA)
     )
     assert illuminated_curve.light_intensity.magnitude == UPDATED_INTENSITY
+    assert_jv_figures(
+        measurement,
+        [('Dark', [-0.1], [-1.0])],
+        [('Illuminated', [0.2, 0.7], [-2.0, 0.4])],
+    )
     solar_cell = archive.results.properties.optoelectronic.solar_cell
     assert magnitude_in(solar_cell.open_circuit_voltage, 'V') == UPDATED_VOC
     assert magnitude_in(
@@ -370,12 +410,18 @@ def test_normalize_logs_and_raises_for_malformed_changed_source(tmp_path):
     measurement, archive = normalize_from_source(tmp_path, sweepme_source())
     logger = CapturingLogger()
     snapshot = measurement.m_to_dict()
+    dark_figure = measurement.jv_curve[0].figures[0].m_to_dict()
+    illuminated_figure = measurement.jv_curve[1].figures[0].m_to_dict()
+    combined_figure = measurement.figures[0].m_to_dict()
     (tmp_path / 'source.json').write_text('{malformed source')
 
     with pytest.raises(ValueError, match='Could not read SweepMe source file'):
         measurement.normalize(archive, logger)
 
     assert measurement.m_to_dict() == snapshot
+    assert measurement.jv_curve[0].figures[0].m_to_dict() == dark_figure
+    assert measurement.jv_curve[1].figures[0].m_to_dict() == illuminated_figure
+    assert measurement.figures[0].m_to_dict() == combined_figure
     assert logger.errors[0][0] == 'Could not refresh SweepMe source metadata'
 
 
