@@ -1,18 +1,15 @@
 from nomad.config.models.plugins import ParserEntryPoint
-from pydantic import Field
 
 
-class NewParserEntryPoint(ParserEntryPoint):
-    parameter: int = Field(0, description='Custom configuration parameter')
-
+class SweepMeParserEntryPoint(ParserEntryPoint):
     def load(self):
-        from nomad_measurements_sweepme.parsers.parser import NewParser
+        from nomad_measurements_sweepme.parsers.parser import SweepMeParser
 
-        return NewParser(**self.model_dump())
+        return SweepMeParser()
 
 
-parser_entry_point = NewParserEntryPoint(
-    name='NewParser',
-    description='New parser entry point configuration.',
-    mainfile_name_re=r'.*\.newmainfilename',
+parser_entry_point = SweepMeParserEntryPoint(
+    name='SweepMe JSON parser',
+    description='Creates editable SweepMe JV archives from SweepMe JSON exports.',
+    mainfile_name_re=r'.*\.json',
 )
