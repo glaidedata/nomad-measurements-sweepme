@@ -100,6 +100,7 @@ class SweepMeJVMeasurement(JVMeasurement, PlotSection, EntryData):
         'V_MPP',
         'I_MPP',
     }
+    _maximum_fill_factor_percent = 100
 
     @staticmethod
     def _is_number(value: Any) -> bool:
@@ -219,18 +220,26 @@ class SweepMeJVMeasurement(JVMeasurement, PlotSection, EntryData):
             raise ValueError(
                 'SweepMe Illuminated Area in cm² must be greater than zero.'
             )
-        intensity = (
-            cls._finite_number(
-                conditions['Illumination in W/m²'], 'Illumination in W/m²'
-            )
-            / 10
+        illumination = cls._finite_number(
+            conditions['Illumination in W/m²'], 'Illumination in W/m²'
         )
+        if illumination < 0:
+            raise ValueError(
+                'SweepMe Illumination in W/m² must be greater than or equal to zero.'
+            )
+        intensity = illumination / 10
 
         calculated = calculated_values[0]
         calculated_numbers = {
             key: cls._finite_number(calculated[key], key)
             for key in cls._required_calculated_value_keys
         }
+        if not 0 <= calculated_numbers['FF'] <= cls._maximum_fill_factor_percent:
+            raise ValueError('SweepMe FF must be between 0 and 100 percent.')
+        if calculated_numbers['PCE'] < 0:
+            raise ValueError(
+                'SweepMe PCE must be greater than or equal to zero percent.'
+            )
         dark_voltage, dark_current_density = cls._curve_from_source(
             source.get('Dark Curve'), 'Dark Curve', active_area
         )

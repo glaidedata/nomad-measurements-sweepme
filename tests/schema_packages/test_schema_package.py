@@ -504,6 +504,46 @@ def test_normalize_rejects_nonfinite_scientific_values_before_mutation(
     assert logger.errors[0][0] == 'Could not refresh SweepMe source metadata'
 
 
+@pytest.mark.parametrize(
+    ('location', 'key', 'value', 'error'),
+    [
+        (
+            'Conditions',
+            'Illumination in W/m²',
+            -1,
+            'Illumination in W/m² must be greater than or equal to zero',
+        ),
+        ('Calculated Values', 'FF', -1, 'FF must be between 0 and 100 percent'),
+        ('Calculated Values', 'FF', 101, 'FF must be between 0 and 100 percent'),
+        (
+            'Calculated Values',
+            'PCE',
+            -1,
+            'PCE must be greater than or equal to zero percent',
+        ),
+    ],
+    ids=['negative-illumination', 'negative-ff', 'ff-over-100', 'negative-pce'],
+)
+def test_normalize_rejects_out_of_range_scientific_values_before_mutation(
+    tmp_path, location, key, value, error
+):
+    measurement, archive = normalize_from_source(tmp_path, sweepme_source())
+    logger = CapturingLogger()
+    snapshot = measurement.m_to_dict()
+    invalid = sweepme_source()
+    if location == 'Calculated Values':
+        invalid[location][0][key] = value
+    else:
+        invalid[location][key] = value
+    write_source(tmp_path, invalid)
+
+    with pytest.raises(ValueError, match=error):
+        measurement.normalize(archive, logger)
+
+    assert measurement.m_to_dict() == snapshot
+    assert logger.errors[0][0] == 'Could not refresh SweepMe source metadata'
+
+
 def test_normalize_rejects_missing_calculated_value_before_mutation(tmp_path):
     measurement, archive = normalize_from_source(tmp_path, sweepme_source())
     logger = CapturingLogger()
