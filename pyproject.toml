@@ -14,7 +14,7 @@ classifiers = [
 ]
 name = "nomad-measurements-sweepme"
 description = "NOMAD plugin for SweepMe measurement data integration"
-version = "0.1.0"
+version = "0.2.0"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
