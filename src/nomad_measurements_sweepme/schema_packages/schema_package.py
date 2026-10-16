@@ -2,6 +2,7 @@ import json
 import math
 from typing import TYPE_CHECKING, Any
 
+from baseclasses.helper.utilities import set_sample_reference
 from baseclasses.solar_energy.jvmeasurement import (
     JVMeasurement,
     SolarCellJVCurveCustom,
@@ -24,7 +25,10 @@ class SweepMeJVMeasurement(JVMeasurement, PlotSection, EntryData):
 
     sample_id = Quantity(
         type=str,
-        description='SweepMe source Sample ID. This is not a NOMAD sample reference.',
+        description=(
+            'SweepMe source Sample ID. It can resolve an existing NOMAD sample, '
+            'but this string is not itself the sample reference.'
+        ),
         a_eln=ELNAnnotation(component=ELNComponentEnum.StringEditQuantity),
     )
     measurement_id = Quantity(
@@ -343,6 +347,9 @@ class SweepMeJVMeasurement(JVMeasurement, PlotSection, EntryData):
                     error=str(error),
                 )
             raise
+
+        if self.sample_id and not self.samples:
+            set_sample_reference(archive, self, self.sample_id)
 
         super().normalize(archive, logger)
 
