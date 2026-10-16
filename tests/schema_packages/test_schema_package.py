@@ -1,13 +1,17 @@
 import json
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from baseclasses.solar_energy.jvmeasurement import JVMeasurement
 from nomad.datamodel import EntryArchive, EntryMetadata
 from nomad.datamodel.context import Context
-from nomad.datamodel.data import EntryData
-from nomad.datamodel.metainfo.basesections import CompositeSystemReference
+from nomad.datamodel.data import EntryData, User
+from nomad.datamodel.metainfo.basesections import (
+    CompositeSystem,
+    CompositeSystemReference,
+)
 
 from nomad_measurements_sweepme.schema_packages import schema_package_entry_point
 from nomad_measurements_sweepme.schema_packages.schema_package import (
@@ -43,6 +47,10 @@ UPDATED_I_MPP = -1.1
 EXPECTED_FALLBACK_EFFICIENCY = 0.5625
 
 
+class SyntheticSample(CompositeSystem, EntryData):
+    pass
+
+
 class RawFileContext(Context):
     def __init__(self, raw_directory: Path):
         super().__init__()
@@ -53,6 +61,13 @@ class RawFileContext(Context):
         with (self.raw_directory / path).open(mode) as file:
             yield file
 
+    def load_archive(self, entry_id: str, upload_id: str, installation_url: str):
+        assert (upload_id, entry_id) == (
+            'other-synthetic-upload',
+            'synthetic-sample-entry',
+        )
+        return EntryArchive(data=SyntheticSample(lab_id='0008-SYN'), m_context=self)
+
 
 class CapturingLogger:
     def __init__(self):
@@ -60,6 +75,13 @@ class CapturingLogger:
 
     def error(self, event, **kwargs):
         self.errors.append((event, kwargs))
+
+
+@pytest.fixture(autouse=True)
+def empty_sample_search(monkeypatch):
+    monkeypatch.setattr(
+        'nomad.search.search', lambda **kwargs: SimpleNamespace(data=[])
+    )
 
 
 def sweepme_source(
@@ -116,6 +138,7 @@ def archive_for(raw_directory: Path, measurement: SweepMeJVMeasurement) -> Entry
             upload_id='synthetic-upload',
             entry_id='editable-entry',
             entry_name='source.archive.json',
+            main_author=User(user_id='synthetic-author'),
         ),
     )
 
@@ -260,6 +283,117 @@ def test_normalize_populates_hzb_jv_model_from_sweepme_source(tmp_path):
         illuminated_curve.current_density_at_maximun_power_point.magnitude
         == pytest.approx(abs(INITIAL_I_MPP) / INITIAL_ACTIVE_AREA)
     )
+
+
+def test_normalize_links_unique_sample_by_source_id(tmp_path, monkeypatch):
+    searches = []
+
+    def search(**kwargs):
+        searches.append(kwargs)
+        return SimpleNamespace(
+            data=[
+                {
+                    'upload_id': 'other-synthetic-upload',
+                    'entry_id': 'synthetic-sample-entry',
+                    'entry_type': 'SyntheticSample',
+                }
+            ]
+        )
+
+    monkeypatch.setattr('nomad.search.search', search)
+    measurement, _ = normalize_from_source(tmp_path, sweepme_source())
+
+    assert searches == [
+        {
+            'owner': 'all',
+            'query': {'results.eln.lab_ids': '0008-SYN'},
+            'user_id': 'synthetic-author',
+        }
+    ]
+    assert len(measurement.samples) == 1
+    assert measurement.samples[0].m_to_dict()['reference'] == (
+        '../uploads/other-synthetic-upload/archive/synthetic-sample-entry#/data'
+    )
+    assert measurement.sample_id == '0008-SYN'
+    assert measurement.measurement_id == 'measurement_beta'
+
+
+@pytest.mark.parametrize(
+    'hits',
+    [
+        [],
+        [
+            {
+                'upload_id': 'synthetic-upload',
+                'entry_id': 'sample-a',
+                'entry_type': 'Sample',
+            },
+            {
+                'upload_id': 'synthetic-upload',
+                'entry_id': 'sample-b',
+                'entry_type': 'Sample',
+            },
+        ],
+        [
+            {
+                'upload_id': 'synthetic-upload',
+                'entry_id': 'measurement-entry',
+                'entry_type': 'JVMeasurement',
+            }
+        ],
+    ],
+    ids=['no-match', 'ambiguous-match', 'wrong-entry-type'],
+)
+def test_normalize_leaves_unresolved_sample_unset(tmp_path, monkeypatch, hits):
+    monkeypatch.setattr(
+        'nomad.search.search', lambda **kwargs: SimpleNamespace(data=hits)
+    )
+
+    measurement, _ = normalize_from_source(tmp_path, sweepme_source())
+
+    assert not measurement.samples
+    assert measurement.sample_id == '0008-SYN'
+
+
+def test_normalize_preserves_manual_sample_without_search(tmp_path, monkeypatch):
+    def unexpected_search(**kwargs):
+        pytest.fail('sample lookup must not run for a manually selected reference')
+
+    monkeypatch.setattr('nomad.search.search', unexpected_search)
+    sample = CompositeSystemReference(name='Manually selected sample')
+    measurement = SweepMeJVMeasurement(data_file='source.json', samples=[sample])
+
+    normalized, _ = normalize_from_source(tmp_path, sweepme_source(), measurement)
+
+    assert normalized.samples[0] is sample
+    assert normalized.samples[0].name == 'Manually selected sample'
+
+
+def test_repeated_normalization_keeps_single_sample_reference(tmp_path, monkeypatch):
+    searches = []
+
+    def search(**kwargs):
+        searches.append(kwargs)
+        return SimpleNamespace(
+            data=[
+                {
+                    'upload_id': 'other-synthetic-upload',
+                    'entry_id': 'synthetic-sample-entry',
+                    'entry_type': 'SyntheticSample',
+                }
+            ]
+        )
+
+    monkeypatch.setattr('nomad.search.search', search)
+    measurement, archive = normalize_from_source(tmp_path, sweepme_source())
+    reference = measurement.samples[0]
+
+    measurement.normalize(archive, CapturingLogger())
+
+    assert len(searches) == 1
+    assert len(measurement.samples) == 1
+    assert measurement.samples[0] is reference
+    assert len(measurement.jv_curve) == EXPECTED_CURVE_COUNT
 
 
 def test_normalization_publishes_hzb_solar_cell_results(tmp_path):
